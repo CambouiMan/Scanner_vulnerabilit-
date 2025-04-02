@@ -13,7 +13,7 @@ class SQLiScanner(BaseScanner):
             with open(file_path, "r", encoding="utf-8") as f:
                 return [line.strip() for line in f if line.strip()]
         except FileNotFoundError:
-            print(f"⚠️ Fichier {file_path} introuvable. Utilisation d'un payload par défaut.")
+            print(f"Fichier {file_path} introuvable. Utilisation d'un payload par défaut.")
             return ["' OR '1'='1"]  # Payload par défaut
 
     def scan(self, url: str):
@@ -43,6 +43,6 @@ class SQLiScanner(BaseScanner):
                     })
 
             except requests.RequestException:
-                print(f"⚠️ Erreur lors de la requête vers {full_url}")
+                print(f"Erreur lors de la requête vers {full_url}")
 
         return vulnerabilities if vulnerabilities else [{"type": "SQLi", "url": url, "status": "Safe"}]
