@@ -3,8 +3,11 @@ from sqlalchemy.orm import Session
 from app.core.database import SessionLocal
 from app.models.scan import ScanResult
 from fastapi.testclient import TestClient
-from main import app
+from app.core.database import SessionLocal
+from fastapi import FastAPI
 
+
+app = FastAPI()
 router = APIRouter()
 
 def get_db():
