@@ -1,6 +1,8 @@
 from sqlalchemy import Column, Integer, String, DateTime, JSON
 from datetime import datetime
-from app.core.database import Base
+from app.core.database import Database
+
+Base = Database().Base  # Récupération de la Base via le Singleton
 
 class ScanResult(Base):
     __tablename__ = "scan_results"

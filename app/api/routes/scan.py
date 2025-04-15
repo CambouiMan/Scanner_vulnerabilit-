@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
-from app.core.database import SessionLocal, engine , ScanResult
+from app.core.database import Database
 from app.models.scan import ScanResult, Base
 from app.services.scanner import Scanner
 from app.repositories.scan_result_repository import ScanResultRepository
@@ -8,12 +8,11 @@ from app.repositories.scan_result_repository import ScanResultRepository
 
 # Création du router FastAPI
 router = APIRouter()
+Base = Database().Base 
 
-# Initialisation de la base de données
-Base.metadata.create_all(bind=engine)
 
 def get_db():
-    db = SessionLocal()
+    db = Database().SessionLocal()  # Session via le Singleton
     try:
         yield db
     finally:
@@ -43,3 +42,4 @@ def start_scan(url: str, db: Session = Depends(get_db)):
 @router.post(" avec notifiers")
 def start_scan(url: str, scanner: Scanner = Depends()):
     return scanner.execute_scan(url) 
+

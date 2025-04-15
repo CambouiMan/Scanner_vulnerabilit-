@@ -2,7 +2,6 @@ from app.services.strategies.xss import XSSScanner
 from app.services.strategies.sqli import SQLiScanner
 from app.services.strategies.base import BaseScanner
 
-
 class ScannerFactory:
     @staticmethod
     def create_scanner(scanner_type: str) -> BaseScanner:

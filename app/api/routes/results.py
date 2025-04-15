@@ -1,17 +1,19 @@
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
-from app.core.database import SessionLocal
 from app.models.scan import ScanResult
 from fastapi.testclient import TestClient
-from app.core.database import SessionLocal
+from app.core.database import Database
 from fastapi import FastAPI
 
 
 app = FastAPI()
 router = APIRouter()
+Base = Database().Base 
+
+
 
 def get_db():
-    db = SessionLocal()
+    db = Database().SessionLocal()  # Session via le Singleton
     try:
         yield db
     finally:

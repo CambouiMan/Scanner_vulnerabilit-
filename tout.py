@@ -1,51 +1,10 @@
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
-from app.core.database import SessionLocal
-from app.models.scan import ScanResult
-from fastapi.testclient import TestClient
-from app.core.database import SessionLocal
-from fastapi import FastAPI
-
-
-app = FastAPI()
-router = APIRouter()
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-@router.get("/results/{scan_id}")
-def get_results(scan_id: int, db: Session = Depends(get_db)):
-    scan = db.query(ScanResult).filter(ScanResult.id == scan_id).first()
-    if not scan:
-        raise HTTPException(status_code=404, detail="Scan not found")
-    return {"scan_id": scan.id, "url": scan.url, "status": scan.status, "vulnerabilities": scan.vulnerabilities, "timestamp": scan.timestamp}
-
-
-@router.get("/results")
-def get_scan_results(db: Session = Depends(get_db)):
-    return db.query(ScanResult).all()
-# Tests unitaires
-client = TestClient(app)
-
-def test_scan_creation():
-    response = client.post("/scan/", json={"url": "http://example.com"})
-    assert response.status_code == 200
-    assert "scan_id" in response.json()
-
-def test_get_scan_results():
-    scan_id = 1  # Supposons qu'un scan existe déjà
-    response = client.get(f"/results/{scan_id}")
-    assert response.status_code in [200, 404]
-
-from fastapi import APIRouter, HTTPException, Depends
-from sqlalchemy.orm import Session
 from app.core.database import SessionLocal, engine , ScanResult
 from app.models.scan import ScanResult, Base
 from app.services.scanner import Scanner
+from app.repositories.scan_result_repository import ScanResultRepository
+
 
 # Création du router FastAPI
 router = APIRouter()
@@ -70,33 +29,55 @@ def save_scan_result(url, vulnerability_type, payload, status):
 def start_scan(url: str, db: Session = Depends(get_db)):
     scanner = Scanner()
     results = scanner.scan(url)
-    
+    repo=ScanResultRepository(db)
     # Stockage des résultats en base de données
     scan_entry = ScanResult(url=url, status="Completed", vulnerabilities=str(results))
+    repo.create({"url": url, "status": "pending"})
     db.add(scan_entry)
     db.commit()
     db.refresh(scan_entry)
     
+    
+    
     return {"message": "Scan terminé", "scan_id": scan_entry.id, "results": results}
+@router.post(" avec notifiers")
+def start_scan(url: str, scanner: Scanner = Depends()):
+    return scanner.execute_scan(url) 
 
-from sqlalchemy import create_engine, Column, Integer, String, Boolean
+
+from sqlalchemy import create_engine, Column, Integer, String
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
-# Définition de l'URL de la base de données SQLite
-DATABASE_URL = "sqlite:///./scanner.db"
+class Database:
+    _instance = None  # Stocke l'instance unique
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            # Configuration initiale
+            cls._instance.DATABASE_URL = "sqlite:///./scanner.db"
+            cls._instance.engine = create_engine(
+                cls._instance.DATABASE_URL, 
+                connect_args={"check_same_thread": False}
+            )
+            cls._instance.SessionLocal = sessionmaker(
+                autocommit=False, 
+                autoflush=False, 
+                bind=cls._instance.engine
+            )
+            cls._instance.Base = declarative_base()
+        return cls._instance
 
-# Création du moteur SQLAlchemy
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+    def init_db(self):
+        """Crée les tables si elles n'existent pas"""
+        self.Base.metadata.create_all(bind=self.engine)
 
-# Session pour interagir avec la base
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# Déclaration du Singleton
+Database()  # Initialisation au chargement du module
 
-# Base de données ORM
-Base = declarative_base()
-
-# Définition de la table des résultats de scan
-class ScanResult(Base):
+# Classe modèle (reste inchangée)
+class ScanResult(Database().Base):
     __tablename__ = "scan_results"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -104,10 +85,6 @@ class ScanResult(Base):
     vulnerability_type = Column(String)
     payload = Column(String, nullable=True)
     status = Column(String)
-
-# Création des tables si elles n'existent pas
-def init_db():
-    Base.metadata.create_all(bind=engine)
 
 from sqlalchemy import Column, Integer, String, DateTime, JSON
 from datetime import datetime
@@ -235,6 +212,11 @@ class ScannerFactory:
 from app.services.strategies.xss import XSSScanner
 from app.services.strategies.sqli import SQLiScanner
 from app.services.scanner_factory import ScannerFactory
+from app.services.observers.scan_subject import ScanSubject
+from app.services.observers.implementations.email_notifier import EmailNotifier
+from app.services.observers.implementations.LogNotifier import LogNotifier
+
+
 
 class Scanner:
     def __init__(self):
@@ -243,12 +225,28 @@ class Scanner:
             ScannerFactory.create_scanner("xss"),
             ScannerFactory.create_scanner("sqli")
         ]
+        self.subject = ScanSubject()
+        self._init_observers()
+
+    def _init_observers(self):
+        
+        self.subject.attach(EmailNotifier())
+        self.subject.attach(LogNotifier())
+
 
     def scan(self, url: str):
         results = []
         for scanner in self.scanners:
             results.append(scanner.scan(url))
         return results
+    def execute_scan(self, url: str):
+        try:
+            results = self.scan(url)  # Appel original
+            self.subject.notify_success(results)
+            return results
+        except Exception as e:
+            self.subject.notify_failure(url, e)
+            raise
 
 from fastapi.testclient import TestClient
 from app.api.routes.scan import router
@@ -408,3 +406,138 @@ def test_scanners_handle_invalid_url():
     scanner = XSSScanner()
     results = scanner.scan("missing-scheme.com")
     assert "error" in results[0]["status"]
+    
+from sqlalchemy.orm import Session
+from app.models.scan import ScanResult
+
+class ScanResultRepository:
+    def __init__(self, db: Session):
+        self.db = db
+
+    def create(self, scan_data: dict) -> ScanResult:
+        scan = ScanResult(**scan_data)
+        self.db.add(scan)
+        self.db.commit()
+        self.db.refresh(scan)
+        return scan
+
+    def get_by_id(self, scan_id: int) -> ScanResult:
+        return self.db.query(ScanResult).get(scan_id)
+
+from abc import ABC, abstractmethod
+from app.models.scan import ScanResult
+
+class ScanObserver(ABC):
+    """Interface pour tous les observateurs de scan"""
+    
+    @abstractmethod
+    def on_scan_completed(self, scan_result: ScanResult):
+        pass
+
+    @abstractmethod
+    def on_scan_failed(self, scan_result: ScanResult, error: Exception):
+        pass
+    
+from typing import List
+from app.services.observers.abstract_observer import ScanObserver
+from app.models.scan import ScanResult
+
+class ScanSubject:
+    """Classe responsable de la gestion des observateurs"""
+    
+    def __init__(self):
+        self._observers: List[ScanObserver] = []
+
+    def attach(self, observer: ScanObserver):
+        if observer not in self._observers:
+            self._observers.append(observer)
+
+    def detach(self, observer: ScanObserver):
+        self._observers.remove(observer)
+
+    def notify_success(self, scan_result: ScanResult):
+        for observer in self._observers:
+            observer.on_scan_completed(scan_result)
+
+    def notify_failure(self, scan_result: ScanResult, error: Exception):
+        for observer in self._observers:
+            observer.on_scan_failed(scan_result, error)
+            
+from app.services.observers.abstract_observer import ScanObserver
+from app.models.scan import ScanResult
+from app.utils.logger import logger  # Votre logger existant
+
+class EmailNotifier(ScanObserver):
+    """Envoie des notifications par email"""
+    
+    def on_scan_completed(self, scan_result: ScanResult):
+            logger.info(f"📧 Notification pour scan, mail envoyé ")
+
+    def on_scan_failed(self, scan_result: ScanResult, error: Exception):
+        logger.error(f"❌ Échec scan  : {error}")
+
+    def _send_email(self, to: str, subject: str, body: str):
+        # Logique SMTP concrète
+        pass
+    
+from fastapi import APIRouter, HTTPException, Depends
+from sqlalchemy.orm import Session
+from app.models.scan import ScanResult
+from fastapi.testclient import TestClient
+from app.core.database import Database
+from fastapi import FastAPI
+
+
+app = FastAPI()
+router = APIRouter()
+Base = Database().Base 
+
+
+
+def get_db():
+    db = Database().SessionLocal()  # Session via le Singleton
+    try:
+        yield db
+    finally:
+        db.close()
+
+@router.get("/results/{scan_id}")
+def get_results(scan_id: int, db: Session = Depends(get_db)):
+    scan = db.query(ScanResult).filter(ScanResult.id == scan_id).first()
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    return {"scan_id": scan.id, "url": scan.url, "status": scan.status, "vulnerabilities": scan.vulnerabilities, "timestamp": scan.timestamp}
+
+
+@router.get("/results")
+def get_scan_results(db: Session = Depends(get_db)):
+    return db.query(ScanResult).all()
+# Tests unitaires
+client = TestClient(app)
+
+def test_scan_creation():
+    response = client.post("/scan/", json={"url": "http://example.com"})
+    assert response.status_code == 200
+    assert "scan_id" in response.json()
+
+def test_get_scan_results():
+    scan_id = 1  # Supposons qu'un scan existe déjà
+    response = client.get(f"/results/{scan_id}")
+    assert response.status_code in [200, 404]
+
+
+from fastapi import FastAPI
+from app.api.routes import scan, results
+from app.core.database import Database
+# Initialisation de l'application FastAPI
+app = FastAPI(title="Web Vulnerability Scanner", version="1.0")
+
+# Inclusion des routes API
+app.include_router(scan.router, prefix="/scan", tags=["Scan"])
+app.include_router(results.router, prefix="/results", tags=["Results"])
+Database = Database()
+Base = Database.init_db()
+# Point d'entrée
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
