@@ -13,3 +13,6 @@ class ScanResult(Base):
 
     def __repr__(self):
         return f"<ScanResult(id={self.id}, url={self.url}, status={self.status})>"
+    def getID(self) : 
+        return self.id
+    
