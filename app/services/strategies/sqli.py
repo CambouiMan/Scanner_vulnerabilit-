@@ -17,7 +17,6 @@ class SQLiScanner(BaseScanner):
             return ["' OR '1'='1"]  # Payload par défaut
 
     def scan(self, url: str):
-        """Teste les injections SQL sur l'URL fournie"""
         vulnerabilities = []
         sql_errors = [
             "you have an error in your sql syntax", 
@@ -27,13 +26,11 @@ class SQLiScanner(BaseScanner):
         ]
 
         for payload in self.payloads:
-            encoded_payload = urllib.parse.quote(payload)  # Encodage pour éviter les erreurs
-            full_url = f"{url}?q={encoded_payload}"
-
             try:
+                encoded_payload = urllib.parse.quote(payload)
+                full_url = f"{url}?q={encoded_payload}"
                 response = requests.get(full_url, timeout=5)
 
-                # Vérifie si la page renvoie une erreur SQL spécifique
                 if any(error in response.text.lower() for error in sql_errors):
                     vulnerabilities.append({
                         "type": "SQLi",
@@ -42,7 +39,17 @@ class SQLiScanner(BaseScanner):
                         "status": "Vulnerable"
                     })
 
-            except requests.RequestException:
-                print(f"⚠️ Erreur lors de la requête vers {full_url}")
+            except requests.RequestException as e:
+                return [{
+                    "type": "SQLi",
+                    "url": url,
+                    "status": "Error",
+                    "details": str(e)
+                }]  # Retour immédiat en cas d'erreur
 
-        return vulnerabilities if vulnerabilities else [{"type": "SQLi", "url": url, "status": "Safe"}]
+        # Retourne "Safe" SEULEMENT si aucune vulnérabilité ni erreur
+        return vulnerabilities if vulnerabilities else [{
+            "type": "SQLi",
+            "url": url,
+            "status": "Safe"
+        }]

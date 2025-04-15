@@ -2,22 +2,27 @@ from sqlalchemy import create_engine, Column, Integer, String
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
+from sqlalchemy import create_engine
+import os
+
+os.environ["SQLALCHEMY_SILENCE_UBER_WARNING"] = "1"
+
 class Database:
     _instance = None  # Stocke l'instance unique
     
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-            # Configuration initiale
-            cls._instance.DATABASE_URL = "sqlite:///./scanner.db"
             cls._instance.engine = create_engine(
-                cls._instance.DATABASE_URL, 
-                connect_args={"check_same_thread": False}
+                "sqlite:///./scanner.db",
+                connect_args={"check_same_thread": False},
+                future=True  # Mode 2.0
             )
             cls._instance.SessionLocal = sessionmaker(
-                autocommit=False, 
-                autoflush=False, 
-                bind=cls._instance.engine
+                autocommit=False,
+                autoflush=False,
+                bind=cls._instance.engine,
+                future=True  # Session compatible 2.0
             )
             cls._instance.Base = declarative_base()
         return cls._instance

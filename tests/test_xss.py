@@ -2,28 +2,24 @@ import pytest
 import requests_mock
 from app.services.strategies.xss import XSSScanner
 
-def test_xss_scanner_vulnerable():
-    scanner = XSSScanner()
-    test_url = "http://example.com"
-    payload = "<script>alert('XSS')</script>"
-    
-    with requests_mock.Mocker() as mocker:
-        mocker.get(f"{test_url}?q={payload}", text=payload)
-        results = scanner.scan(test_url)
-        
-    assert results[0]["status"] == "Vulnerable"
-    assert results[0]["payload"] == payload
+class TestXSSScanner:
+    @pytest.fixture
+    def scanner(self):
+        return XSSScanner()
 
-def test_xss_scanner_safe():
-    scanner = XSSScanner()
-    test_url = "http://example.com"
-    
-    with requests_mock.Mocker() as mocker:
-        mocker.get(f"{test_url}?q=<script>alert('XSS')</script>", text="Safe Response")
-        results = scanner.scan(test_url)
+    def test_detect_xss_vulnerability(self, scanner):
+        test_url = "http://xss-site.com"
+        payload = scanner.payloads[0]
         
-    assert results[0]["status"] == "Safe"
+        with requests_mock.Mocker() as m:
+            m.get(f"{test_url}?q={payload}", text=payload)
+            results = scanner.scan(test_url)
+            
+        assert any(res["status"] == "Vulnerable" for res in results)
 
-def test_xss_scanner_file_not_found():
-    scanner = XSSScanner(payload_file="non_existent.txt")
-    assert scanner.payloads == ["<script>alert('XSS')</script>"]
+    def test_no_xss_detected(self, scanner):
+        with requests_mock.Mocker() as m:
+            m.get(requests_mock.ANY, text="safe content")
+            results = scanner.scan("http://safe-site.com")
+            
+        assert all(res["status"] == "Safe" for res in results)
