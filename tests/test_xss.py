@@ -1,25 +1,46 @@
 import pytest
-import requests_mock
 from app.services.strategies.xss import XSSScanner
 
-class TestXSSScanner:
-    @pytest.fixture
-    def scanner(self):
-        return XSSScanner()
+@pytest.fixture
+def scanner():
+    scanner = XSSScanner()
+    scanner.payloads = ["<script>alert('XSS')</script>"]
+    return scanner
 
-    def test_detect_xss_vulnerability(self, scanner):
-        test_url = "http://xss-site.com"
-        payload = scanner.payloads[0]
-        
-        with requests_mock.Mocker() as m:
-            m.get(f"{test_url}?q={payload}", text=payload)
-            results = scanner.scan(test_url)
-            
-        assert any(res["status"] == "Vulnerable" for res in results)
+def test_xss_vulnerable(scanner, monkeypatch):
+    class MockResponse:
+        text = "Welcome <script>alert('XSS')</script>!"
 
-    def test_no_xss_detected(self, scanner):
-        with requests_mock.Mocker() as m:
-            m.get(requests_mock.ANY, text="safe content")
-            results = scanner.scan("http://safe-site.com")
-            
-        assert all(res["status"] == "Safe" for res in results)
+    def mock_get(*args, **kwargs):
+        return MockResponse()
+
+    monkeypatch.setattr("app.services.strategies.xss.requests.get", mock_get)
+
+    url = "http://example.com/search"
+    result = scanner.scan(url)
+
+    assert len(result) == 1
+    assert result[0]["status"] == "Vulnerable"
+    assert result[0]["payload"] == "<script>alert('XSS')</script>"
+
+def test_xss_safe(scanner, monkeypatch):
+    class MockResponse:
+        text = "Welcome user, nothing to see here"
+
+    def mock_get(*args, **kwargs):
+        return MockResponse()
+
+    monkeypatch.setattr("app.services.strategies.xss.requests.get", mock_get)
+
+    url = "http://example.com/search"
+    result = scanner.scan(url)
+
+    assert len(result) == 1
+    assert result[0]["status"] == "Safe"
+
+def test_xss_default_payload(monkeypatch, tmp_path):
+    # Crée un chemin invalide pour forcer l'utilisation du payload par défaut
+    fake_path = tmp_path / "inexistant_payloads.txt"
+    scanner = XSSScanner(payload_file=str(fake_path))
+
+    assert scanner.payloads == ["<script>alert('XSS')</script>"]

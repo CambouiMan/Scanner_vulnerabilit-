@@ -4,6 +4,8 @@ from app.models.scan import ScanResult
 from fastapi.testclient import TestClient
 from app.core.database import Database
 from fastapi import FastAPI
+import json 
+
 
 
 app = FastAPI()
@@ -24,7 +26,14 @@ def get_results(scan_id: int, db: Session = Depends(get_db)):
     scan = db.query(ScanResult).filter(ScanResult.id == scan_id).first()
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
-    return {"scan_id": scan.id, "url": scan.url, "status": scan.status, "vulnerabilities": scan.vulnerabilities, "timestamp": scan.timestamp}
+    return {
+        "scan_id": scan.id,
+        "url": scan.url,
+        "status": scan.status,
+        "vulnerabilities": json.loads(scan.vulnerabilities),
+
+        "timestamp": scan.timestamp
+    }
 
 
 @router.get("/results")

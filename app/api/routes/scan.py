@@ -4,6 +4,8 @@ from app.core.database import Database
 from app.models.scan import ScanResult, Base
 from app.services.scanner import Scanner
 from app.repositories.scan_result_repository import ScanResultRepository
+import json
+
 
 
 # Création du router FastAPI
@@ -18,7 +20,7 @@ def get_db():
     finally:
         db.close()
 def save_scan_result(url, vulnerability_type, payload, status):
-    db = SessionLocal()
+    db = Database().SessionLocal()
     result = ScanResult(url=url, vulnerability_type=vulnerability_type, payload=payload, status=status)
     db.add(result)
     db.commit()
@@ -30,7 +32,12 @@ def start_scan(url: str, db: Session = Depends(get_db)):
     results = scanner.scan(url)
     repo=ScanResultRepository(db)
     # Stockage des résultats en base de données
-    scan_entry = ScanResult(url=url, status="Completed", vulnerabilities=str(results))
+    scan_entry = ScanResult(
+        url=url,
+        status="Completed",
+        vulnerabilities=json.dumps(results)  # → JSON string propre
+    )
+
     repo.create({"url": url, "status": "pending"})
     db.add(scan_entry)
     db.commit()

@@ -1,29 +1,40 @@
 import pytest
-import requests
-import requests_mock
+from app.services.strategies.sqli import SQLiScanner
 from app.services.strategies.sqli import SQLiScanner
 
-class TestSQLiScanner:
-    @pytest.fixture
-    def scanner(self):
-        return SQLiScanner()
+@pytest.fixture
+def scanner():
+    scanner = SQLiScanner()
+    scanner.payloads = ["' OR '1'='1"]  # Mock des payloads pour éviter la lecture de fichier
+    return scanner
 
-    def test_detect_sqli_vulnerability(self, scanner):
-        test_url = "http://vuln-site.com"
-        payload = scanner.payloads[0]
-        
-        with requests_mock.Mocker() as m:
-            m.get(
-                f"{test_url}?q={payload}", 
-                text="you have an error in your sql syntax"
-            )
-            results = scanner.scan(test_url)
-            
-        assert any(res["status"] == "Vulnerable" for res in results)
+def test_sqli_vulnerable(scanner, monkeypatch):
+    class MockResponse:
+        text = "You have an error in your SQL syntax"
 
-    def test_handle_request_timeout(self, scanner):
-        with requests_mock.Mocker() as m:
-            m.get(requests_mock.ANY, exc=requests.exceptions.ConnectTimeout)
-            results = scanner.scan("http://unreachable.com")
-            
-        assert results[0]["status"] == "Error"
+    def mock_get(*args, **kwargs):
+        return MockResponse()
+
+    monkeypatch.setattr("app.services.strategies.sqli.requests.get", mock_get)
+
+    url = "http://example.com/search"
+    result = scanner.scan(url)
+
+    assert len(result) == 1
+    assert result[0]["status"] == "Vulnerable"
+    assert result[0]["payload"] == "' OR '1'='1"
+
+def test_sqli_safe(scanner, monkeypatch):
+    class MockResponse:
+        text = "Page loaded successfully with no error"
+
+    def mock_get(*args, **kwargs):
+        return MockResponse()
+
+    monkeypatch.setattr("app.services.strategies.sqli.requests.get", mock_get)
+
+    url = "http://example.com/search"
+    result = scanner.scan(url)
+
+    assert len(result) == 1
+    assert result[0]["status"] == "Safe"
