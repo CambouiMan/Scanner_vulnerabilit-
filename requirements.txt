@@ -1,4 +1,8 @@
-fastapi
-uvicorn
-sqlalchemy
-pytest
+fastapi>=0.68.0
+uvicorn[standard]>=0.15.0
+sqlalchemy>=1.4.0
+requests>=2.26.0
+pydantic>=1.8.0
+pytest>=6.2.0
+requests-mock>=1.9.3
+python-multipart>=0.0.5

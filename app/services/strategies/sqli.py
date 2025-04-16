@@ -4,7 +4,7 @@ import urllib.parse
 from app.services.strategies.base import BaseScanner
 
 class SQLiScanner(BaseScanner):
-    def __init__(self, payload_file="app/payloads/sqli_payloads.txt"):
+    def __init__(self, payload_file="payloads/sqli_payloads.txt"):
         self.payloads = self.load_payloads(payload_file)
 
     def load_payloads(self, file_path):
